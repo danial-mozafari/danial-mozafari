@@ -18,7 +18,7 @@ I enjoy turning ideas into functional projects, exploring modern technologies, a
 
 - 🌐 [Personal Dashboard](https://danial-mozafari.github.io/danial-mozafari/)
 - 💼 [LinkedIn](https://www.linkedin.com/in/danial-mozafari-3473a7425/)
-- 📧 pes370771@gmail.com
+- 📧 [pes370771@gmail.com](mailto:pes370771@gmail.com)
 
 ---
 
