@@ -59,7 +59,7 @@
     platforms: [
       { icon: "send",           label: "Telegram",  detail: "Channel",              href: "https://t.me/DMio_officail" },
       { icon: "message-circle", label: "Message Me",detail: "Direct on Telegram",   href: "https://t.me/danial_mozafarii" },
-      { icon: "github",         label: "GitHub",    detail: "Code & repos",         href: "https://github.com/pes370771-cmd" },
+      { icon: "github",         label: "GitHub",    detail: "Code & repos",         href: "https://github.com/danial-mozafari" },
       { icon: "linkedin",       label: "LinkedIn",  detail: "Professional network", href: "https://www.linkedin.com/in/danial-mozafari-3473a7425/" },
       { icon: "instagram",      label: "Instagram", detail: "Visual updates",       href: "https://instagram.com/dm.io1" }
       // Add more here, e.g.:
@@ -284,19 +284,26 @@
   // of switching straight to the app. This tries the native app via the
   // tg:// scheme, and only falls back to the web link if the app never
   // took over (not installed) — and never fires again once it has.
-  function openTelegram(evt, webUrl) {
-    evt.preventDefault();
+  // Setting the link's real href to the tg:// scheme (instead of
+  // redirecting via JS) is what makes this work consistently across
+  // both Safari and Chrome — the app-switch happens as the browser's
+  // own native handling of the click, not a script-driven redirect.
+  // If nothing takes over (app not installed), we fall back to the
+  // normal web link after a short wait.
+  function wireTelegramLink(el, webUrl) {
     const username = webUrl.split('t.me/')[1].replace(/\/$/, '');
-    let appOpened = false;
-    const onHide = () => { if (document.hidden) appOpened = true; };
-    document.addEventListener('visibilitychange', onHide);
-    window.location.href = 'tg://resolve?domain=' + username;
-    setTimeout(() => {
-      document.removeEventListener('visibilitychange', onHide);
-      if (!appOpened) {
-        window.location.href = webUrl;
-      }
-    }, 1200);
+    el.href = 'tg://resolve?domain=' + username;
+    el.addEventListener('click', () => {
+      let appOpened = false;
+      const onHide = () => { if (document.hidden) appOpened = true; };
+      document.addEventListener('visibilitychange', onHide);
+      setTimeout(() => {
+        document.removeEventListener('visibilitychange', onHide);
+        if (!appOpened) {
+          window.location.href = webUrl;
+        }
+      }, 1200);
+    });
   }
 
   document.getElementById('hero-tagline').textContent = CONFIG.identity.tagline;
@@ -309,7 +316,7 @@
     const card = document.createElement('a');
     card.href = p.href;
     if (isTelegram) {
-      card.addEventListener('click', (e) => openTelegram(e, p.href));
+      wireTelegramLink(card, p.href);
     } else {
       card.target = '_blank'; card.rel = 'noreferrer';
     }
@@ -383,7 +390,7 @@
     const a = document.createElement('a');
     a.href = p.href;
     if (p.href.includes('t.me/')) {
-      a.addEventListener('click', (e) => openTelegram(e, p.href));
+      wireTelegramLink(a, p.href);
     } else {
       a.target = '_blank'; a.rel = 'noreferrer';
     }
