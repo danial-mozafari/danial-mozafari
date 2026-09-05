@@ -3,13 +3,6 @@ USD Price Dashboard - Flask backend
 ====================================
 یک سرور که هر چند ثانیه یک‌بار قیمت دلار رو آپدیت می‌کنه و از طریق یک API
 در اختیار داشبورد (که هم روی موبایل، هم دسکتاپ استفاده میشه) قرار می‌ده.
-
-طراحی:
-- یک Thread پس‌زمینه قیمت رو fetch می‌کنه و در حافظه نگه می‌داره؛ همه‌ی
-  کلاینت‌ها با poll کردن /api/price همین مقدار مشترک رو می‌خونن.
-- یک تاریخچه‌ی کوچیک (برای نمودار) + یک فایل روی دیسک (daily_data.json)
-  برای «قیمت باز شدن امروز» و «بسته‌شدن دیروز» که بعد از ری‌استارت هم
-  از دست نمی‌ره.
 """
 
 import os
@@ -38,13 +31,8 @@ DAILY_FILE = os.path.join(BASE_DIR, "daily_data.json")
 VAPID_PRIVATE_FILE = os.path.join(BASE_DIR, "vapid_private_key.pem")
 SUBSCRIPTIONS_FILE = os.path.join(BASE_DIR, "subscriptions.json")
 
-# آدرس ایمیلی که طبق استاندارد Web Push باید به سرویس‌های Push (گوگل/اپل)
-# معرفی بشه. لازم نیست واقعی باشه ولی بهتره فرمتش درست باشه.
 VAPID_CLAIM_EMAIL = os.environ.get("VAPID_CLAIM_EMAIL", "mailto:example@example.com")
 
-# ---------------------------------------------------------------------------
-# بخش دریافت قیمت
-# ---------------------------------------------------------------------------
 USE_REAL_API = os.environ.get("USE_REAL_API", "0") == "1"
 BRSAPI_KEY = os.environ.get("BRSAPI_KEY", "").strip()
 
@@ -70,7 +58,7 @@ state = {
     "today_high": None,
     "today_low": None,
 }
-price_history = deque(maxlen=HISTORY_MAXLEN)  # هر آیتم: {"t": iso-time, "p": price}
+price_history = deque(maxlen=HISTORY_MAXLEN)
 
 
 def load_daily_data():
@@ -100,33 +88,31 @@ def save_daily_data(data):
 
 daily = load_daily_data()
 
-
-# ---------------------------------------------------------------------------
-# Web Push: کلید VAPID + مدیریت اشتراک‌های گوشی‌ها
-# ---------------------------------------------------------------------------
-# VAPID یه جفت کلید (خصوصی/عمومی) هست که با اون سرور خودش رو به سرویس Push
-# (سرورهای گوگل/موزیلا/اپل) معرفی می‌کنه. یه بار تولید میشه و توی یک فایل
-# ذخیره می‌مونه (هیچ‌وقت نباید توی گیت‌هاب پابلیش بشه - توی .gitignore هست).
 subscriptions_lock = threading.Lock()
 
 
 def ensure_vapid_keys() -> Vapid:
-    # روی هاست‌های رایگان (مثل Render) دیسک ممکنه بین ری‌استارت‌ها خالی بشه.
-    # اگه کلید خصوصی رو به‌عنوان متغیر محیطی هم بدی، همیشه همون کلید حفظ
-    # میشه و گوشی‌هایی که قبلاً مشترک شدن معتبر می‌مونن.
     env_key = os.environ.get("VAPID_PRIVATE_KEY_PEM", "").strip()
     if env_key:
         with open(VAPID_PRIVATE_FILE, "w") as f:
             f.write(env_key.replace("\\n", "\n"))
     elif not os.path.exists(VAPID_PRIVATE_FILE):
-        vapid = Vapid()
-        vapid.generate_keys()
-        vapid.save_key(VAPID_PRIVATE_FILE)
+        from cryptography.hazmat.primitives.asymmetric import ec as _ec
+        from cryptography.hazmat.primitives import serialization as _ser
+
+        private_key = _ec.generate_private_key(_ec.SECP256R1())
+        pem = private_key.private_bytes(
+            encoding=_ser.Encoding.PEM,
+            format=_ser.PrivateFormat.PKCS8,
+            encryption_algorithm=_ser.NoEncryption(),
+        )
+        with open(VAPID_PRIVATE_FILE, "wb") as f:
+            f.write(pem)
+
         print(f"[vapid] کلید جدید ساخته شد: {VAPID_PRIVATE_FILE}")
-        with open(VAPID_PRIVATE_FILE, "r") as f:
-            print("[vapid] برای اینکه این کلید روی هاست رایگان دائمی بمونه، محتوای")
-            print("[vapid] همین فایل رو به‌عنوان env var به اسم VAPID_PRIVATE_KEY_PEM ست کن:")
-            print(f.read())
+        print("[vapid] برای اینکه این کلید روی هاست رایگان دائمی بمونه، محتوای")
+        print("[vapid] همین فایل رو به‌عنوان env var به اسم VAPID_PRIVATE_KEY_PEM ست کن:")
+        print(pem.decode())
     return Vapid.from_file(VAPID_PRIVATE_FILE)
 
 
@@ -134,7 +120,6 @@ vapid_instance = ensure_vapid_keys()
 
 
 def get_vapid_public_key_b64() -> str:
-    """کلید عمومی رو به فرمتی که مرورگر (pushManager.subscribe) نیاز داره برمی‌گردونه."""
     import base64
     numbers = vapid_instance.public_key.public_numbers()
     x = numbers.x.to_bytes(32, "big")
@@ -150,7 +135,7 @@ def load_subscriptions():
                 return json.load(f)
         except Exception:
             pass
-    return []  # هر آیتم: {"subscription": {...}, "alerts": [{"id","direction","value","firedAt"}]}
+    return []
 
 
 def save_subscriptions(subs):
@@ -165,7 +150,6 @@ subscriptions = load_subscriptions()
 
 
 def send_push(subscription_info: dict, title: str, body: str) -> bool:
-    """یک نوتیفیکیشن Push واقعی می‌فرسته. اگه اشتراک منقضی/نامعتبر شده باشه False برمی‌گردونه."""
     try:
         webpush(
             subscription_info=subscription_info,
@@ -177,14 +161,13 @@ def send_push(subscription_info: dict, title: str, body: str) -> bool:
     except WebPushException as e:
         status = getattr(e.response, "status_code", None)
         print(f"[send_push] خطا (status={status}): {e}")
-        return status not in (404, 410)  # یعنی اشتراک هنوز معتبره، فقط خطای موقت بوده
+        return status not in (404, 410)
     except Exception as e:
         print(f"[send_push] خطای غیرمنتظره: {e}")
-        return True  # بدون اطلاعات کافی، اشتراک رو حذف نمی‌کنیم
+        return True
 
 
 def check_and_fire_alerts(new_price: float):
-    """آستانه‌های هر گوشی رو با قیمت جدید چک می‌کنه و در صورت لزوم Push می‌فرسته."""
     with subscriptions_lock:
         changed = False
         still_valid = []
@@ -204,7 +187,7 @@ def check_and_fire_alerts(new_price: float):
                         f"دلار به {int(new_price):,} تومان رسید",
                     )
                     if not ok:
-                        alive = False  # اشتراک منقضی شده، این گوشی رو حذف کن
+                        alive = False
                         break
                     alert["firedAt"] = datetime.now(timezone.utc).isoformat()
                     changed = True
@@ -218,7 +201,6 @@ def check_and_fire_alerts(new_price: float):
 
 
 def update_daily_tracking(new_price: float):
-    """قیمت باز شدن امروز، بسته‌شدن دیروز، و بیشترین/کمترین امروز رو آپدیت می‌کنه."""
     today = datetime.now(TEHRAN_TZ).strftime("%Y-%m-%d")
 
     if daily["date"] is None:
@@ -241,7 +223,6 @@ def update_daily_tracking(new_price: float):
 
 
 def fetch_simulated_price(previous_price: float) -> float:
-    """قیمت رو با یک نوسان کوچیک تصادفی حرکت می‌ده (فقط برای دمو)."""
     if previous_price == 0:
         previous_price = 68500
     drift = random.uniform(-40, 40)
@@ -249,7 +230,6 @@ def fetch_simulated_price(previous_price: float) -> float:
 
 
 def fetch_real_price() -> float:
-    """قیمت واقعی دلار رو از BrsApi.ir می‌گیره."""
     if not BRSAPI_KEY:
         raise RuntimeError("BRSAPI_KEY تنظیم نشده. قبل از اجرا این متغیر محیطی رو ست کن.")
 
@@ -274,8 +254,6 @@ def fetch_real_price() -> float:
                 break
             return float(price_str)
 
-    # این خط رو موقتاً از حالت کامنت خارج کن تا ساختار واقعی جواب رو ببینی:
-    # print("RAW RESPONSE:", data)
     raise ValueError("آیتم دلار (USD) توی پاسخ API پیدا نشد.")
 
 
@@ -313,10 +291,6 @@ def price_updater_loop():
         time.sleep(POLL_INTERVAL_SECONDS)
 
 
-# ---------------------------------------------------------------------------
-# روت‌ها — فقط یک صفحه، برای موبایل و دسکتاپ هر دو
-# ---------------------------------------------------------------------------
-
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -337,7 +311,6 @@ def api_vapid_public_key():
 
 @app.route("/api/subscribe", methods=["POST"])
 def api_subscribe():
-    """گوشی/مرورگر، اطلاعات اشتراک Push + لیست هشدارهاش رو اینجا ثبت می‌کنه."""
     body = request.get_json(force=True, silent=True) or {}
     subscription_info = body.get("subscription")
     alerts = body.get("alerts", [])
@@ -345,7 +318,6 @@ def api_subscribe():
         return jsonify({"ok": False, "error": "invalid subscription"}), 400
 
     with subscriptions_lock:
-        # جایگزینی رکورد قبلی همین گوشی (بر اساس endpoint یکتا)
         subscriptions[:] = [s for s in subscriptions if s["subscription"]["endpoint"] != subscription_info["endpoint"]]
         subscriptions.append({"subscription": subscription_info, "alerts": alerts})
         save_subscriptions(subscriptions)
@@ -363,15 +335,6 @@ def api_unsubscribe():
     return jsonify({"ok": True})
 
 
-
-# ---------------------------------------------------------------------------
-# اجرای Thread پس‌زمینه
-# ---------------------------------------------------------------------------
-# این خط عمداً بیرون از "if __name__ == '__main__'" هست: وقتی روی هاست با
-# gunicorn اجرا میشه (نه با "python app.py")، اون بلوک اجرا نمیشه ولی این
-# خط چرا - چون همین که ماژول import بشه اجرا میشه. حواست باشه روی هاست
-# دقیقاً با یک worker اجرا بشه (gunicorn app:app --workers 1)، وگرنه چند
-# نسخه از این Thread همزمان قیمت رو fetch می‌کنن.
 _updater_thread = threading.Thread(target=price_updater_loop, daemon=True)
 _updater_thread.start()
 
