@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+*.pyc
+.env
+daily_data.json
+vapid_private_key.pem
+subscriptions.json
+daily_data.json
