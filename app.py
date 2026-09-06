@@ -1,8 +1,6 @@
 """
 USD Price Dashboard - Flask backend
 ====================================
-یک سرور که هر چند ثانیه یک‌بار قیمت دلار رو آپدیت می‌کنه و از طریق یک API
-در اختیار داشبورد (که هم روی موبایل، هم دسکتاپ استفاده میشه) قرار می‌ده.
 """
 
 import os
@@ -234,7 +232,7 @@ def fetch_real_price() -> float:
         raise RuntimeError("BRSAPI_KEY تنظیم نشده. قبل از اجرا این متغیر محیطی رو ست کن.")
 
     url = f"https://Api.BrsApi.ir/Market/Gold_Currency.php?key={BRSAPI_KEY}"
-    resp = requests.get(url, headers=REQUEST_HEADERS, timeout=5)
+    resp = requests.get(url, headers=REQUEST_HEADERS, timeout=20)
     resp.raise_for_status()
     data = resp.json()
 
@@ -264,6 +262,7 @@ def price_updater_loop():
                 old_price = state["price"]
 
             new_price = fetch_real_price() if USE_REAL_API else fetch_simulated_price(old_price)
+            print(f"[price_updater_loop] قیمت گرفته شد: {new_price}")
 
             change_percent = 0.0
             if old_price:
